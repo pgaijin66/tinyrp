@@ -1,6 +1,6 @@
 server:
-  host: "0.0.0.0"
-  listen_port: "80"
+  host: "localhost"
+  listen_port: "8080"
   scheme: http
 
 resources:

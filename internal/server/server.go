@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/pgaijin66/lightweight-reverse-proxy/internal/configs"
 )
@@ -44,76 +45,43 @@ func Run() error {
 	if err != nil {
 		log.Fatalf("could not load configuration: %v", err)
 	}
-
-	fmt.Println(config.Resources)
-
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", handleRequestAndRedirect1)
-	mux.HandleFunc("/server2", handleRequestAndRedirect2)
-	mux.HandleFunc("/server3", handleRequestAndRedirect3)
+	for _, resource := range config.Resources {
+		url, _ := url.Parse(resource.Destination_URL)
+		proxy := NewProxy(url)
+		mux.HandleFunc(resource.Endpoint, ProxyRequestHandler(proxy, url, resource.Endpoint))
+	}
 
 	http.ListenAndServe(":8080", mux)
-
 	return nil
 
 }
 
-// Given a request send it to the appropriate url
-func handleRequestAndRedirect1(res http.ResponseWriter, req *http.Request) {
+func NewProxy(target *url.URL) *httputil.ReverseProxy {
 	// We will get to this...
-	url, _ := url.Parse("http://localhost:9001")
+	// url, _ := url.Parse(target)
 	// create the reverse proxy
-	proxy := httputil.NewSingleHostReverseProxy(url)
-
-	// Update the headers to allow for SSL redirection
-	req.URL.Host = url.Host
-	req.URL.Scheme = url.Scheme
-	req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
-	req.Host = url.Host
-
-	// Note that ServeHttp is non blocking and uses a go routine under the hood
-	proxy.ServeHTTP(res, req)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	return proxy
 }
 
-// Given a request send it to the appropriate url
-func handleRequestAndRedirect2(res http.ResponseWriter, req *http.Request) {
-	// We will get to this...
-	url, _ := url.Parse("http://localhost:9002")
-	// create the reverse proxy
-	proxy := httputil.NewSingleHostReverseProxy(url)
+func ProxyRequestHandler(proxy *httputil.ReverseProxy, url *url.URL, endpoint string) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Printf("[ TinyRP ] Request received at %s at %s\n", r.URL, time.Now().UTC())
+		// Update the headers to allow for SSL redirection
+		r.URL.Host = url.Host
+		r.URL.Scheme = url.Scheme
+		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
+		r.Host = url.Host
 
-	// Update the headers to allow for SSL redirection
-	req.URL.Host = url.Host
-	req.URL.Scheme = url.Scheme
-	req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
-	req.Host = url.Host
+		//trim reverseProxyRoutePrefix
+		path := r.URL.Path
+		r.URL.Path = strings.TrimLeft(path, endpoint)
 
-	//trim reverseProxyRoutePrefix
-	path := req.URL.Path
-	req.URL.Path = strings.TrimLeft(path, "/server2")
+		// Note that ServeHttp is non blocking and uses a go routine under the hood
+		fmt.Printf("[ TinyRP ] Redirecting request to %s at %s\n", r.URL, time.Now().UTC())
+		proxy.ServeHTTP(w, r)
 
-	// Note that ServeHttp is non blocking and uses a go routine under the hood
-	proxy.ServeHTTP(res, req)
-}
-
-// Given a request send it to the appropriate url
-func handleRequestAndRedirect3(res http.ResponseWriter, req *http.Request) {
-	// We will get to this...
-	url, _ := url.Parse("http://localhost:9003")
-	// create the reverse proxy
-	proxy := httputil.NewSingleHostReverseProxy(url)
-
-	// Update the headers to allow for SSL redirection
-	req.URL.Host = url.Host
-	req.URL.Scheme = url.Scheme
-	req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
-	req.Host = url.Host
-
-	//trim reverseProxyRoutePrefix
-	path := req.URL.Path
-	req.URL.Path = strings.TrimLeft(path, "/server3")
-
-	// Note that ServeHttp is non blocking and uses a go routine under the hood
-	proxy.ServeHTTP(res, req)
+	}
 }

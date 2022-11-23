@@ -1,0 +1,15 @@
+server:
+  host: "0.0.0.0"
+  listen_port: "80"
+  scheme: http
+
+resources:
+  - name: Server1
+    endpoint: /server1
+    destination_url: "http://localhost:9001"
+  - name: Server2
+    endpoint: /server2
+    destination_url: "http://localhost:9002"
+  - name: Server3
+    endpoint: /server3
+    destination_url: "http://localhost:9003"

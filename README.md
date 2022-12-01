@@ -4,10 +4,10 @@ TinyRP is a simple lightweight HTTP reverse proxy made in golang
 
 ### Feature
 
-[X] reverse proxy based on endpoint 
-[] Loadbalancing using different algorithms
-[] Support TLS
-[] SSL Offloading
+- [x] reverse proxy based on endpoint
+- [ ] Loadbalancing using different algorithms
+- [ ] Support TLS
+- [ ] SSL Offloading
 
 
 ### Usage

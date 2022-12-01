@@ -1,5 +1,13 @@
 ## TinyRP - Simple lightweight HTTP proxy
 
+  _   _             ____  ____
+  | |_(_)_ __  _   _|  _ \|  _ \
+  | __| | '_ \| | | | |_) | |_) |
+  | |_| | | | | |_| |  _ <|  __/
+  \__|_|_| |_|\__, |_| \_\_|
+              |___/        
+
+
 TinyRP is a simple lightweight HTTP reverse proxy made in golang
 
 ### Feature

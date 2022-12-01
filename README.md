@@ -2,10 +2,12 @@
 
 TinyRP is a simple lightweight HTTP reverse proxy made in golang
 
-
-### Current available feature
+### Feature
 
 [X] reverse proxy based on endpoint 
+[] Loadbalancing using different algorithms
+[] Support TLS
+[] SSL Offloading
 
 
 ### Usage
@@ -26,20 +28,15 @@ resources:
 
 ```
 
-2. Run reverse proxy and pass config file as an argument as shown below
 
-```
-tinyrp --path="PATH_TO_RESOURCE_FILE"
-```
-
-##### Run demo services
+##### usage
 
 The below command will run three demo services server1, server2 and server3
 
 ```
-make run
+$ make run-containers
+$ make run-proxy-server
 ```
-
 
 ### Requirement
 

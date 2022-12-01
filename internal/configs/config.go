@@ -31,9 +31,6 @@ func NewConfiguration() (*configuration, error) {
 	viper.SetConfigType("yaml")
 	viper.AutomaticEnv()
 
-	// Below statement is required if you want to fetch environment
-	// Eg: To fetch from env var from database.driver, set env var as
-	// DATABASE_DRIVER
 	viper.SetEnvKeyReplacer(strings.NewReplacer(`.`, `_`))
 	err := viper.ReadInConfig()
 
@@ -47,12 +44,3 @@ func NewConfiguration() (*configuration, error) {
 	}
 	return Config, nil
 }
-
-// server:
-//   listen_port: 8000
-//   protocol: http
-
-// resources:
-//   - name: Forward request to google
-//     source: /google
-//     destinations: ["https://www.google.com"]

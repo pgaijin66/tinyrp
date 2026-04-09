@@ -6,8 +6,22 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
+
+type bufferPool struct {
+	pool sync.Pool
+}
+
+func (b *bufferPool) Get() []byte  { return b.pool.Get().([]byte) }
+func (b *bufferPool) Put(buf []byte) { b.pool.Put(buf) }
+
+var pool = &bufferPool{
+	pool: sync.Pool{
+		New: func() any { return make([]byte, 32*1024) },
+	},
+}
 
 var transport = &http.Transport{
 	DialContext: (&net.Dialer{
@@ -27,6 +41,7 @@ var transport = &http.Transport{
 func NewProxy(target *url.URL) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = transport
+	proxy.BufferPool = pool
 	return proxy
 }
 

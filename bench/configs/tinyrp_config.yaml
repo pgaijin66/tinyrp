@@ -1,0 +1,9 @@
+server:
+  host: "localhost"
+  listen_port: "8080"
+  scheme: http
+
+resources:
+  - name: backend
+    endpoint: /proxy
+    destination_url: "http://localhost:9090"

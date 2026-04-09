@@ -1,0 +1,11 @@
+entryPoints:
+  web:
+    address: ":8083"
+
+providers:
+  file:
+    filename: /Users/pthapa/Documents/src/github/personal/tinyrp/bench/configs/traefik_routes.yaml
+
+accessLog: false
+log:
+  level: ERROR

@@ -1,0 +1,13 @@
+http:
+  routers:
+    bench:
+      rule: "PathPrefix(`/`)"
+      service: backend
+      entryPoints:
+        - web
+
+  services:
+    backend:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:9090"

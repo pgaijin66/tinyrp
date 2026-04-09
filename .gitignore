@@ -1,1 +1,4 @@
 scripts/dev.sh
+bin/
+bench/*_bin
+bench/results/

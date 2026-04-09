@@ -1,0 +1,11 @@
+{
+    admin off
+    auto_https off
+}
+
+:8082 {
+    reverse_proxy 127.0.0.1:9090
+    log {
+        output discard
+    }
+}

@@ -23,9 +23,8 @@ func ProxyRequestHandler(proxy *httputil.ReverseProxy, url *url.URL, endpoint st
 		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
 		r.Host = url.Host
 
-		//trim reverseProxyRoutePrefix
-		path := r.URL.Path
-		r.URL.Path = strings.TrimLeft(path, endpoint)
+		// strip the proxy route prefix
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, endpoint)
 
 		// Note that ServeHttp is non blocking and uses a go routine under the hood
 		fmt.Printf("[ TinyRP ] Redirecting request to %s at %s\n", r.URL, time.Now().UTC())

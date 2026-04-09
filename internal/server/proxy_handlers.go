@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -22,10 +23,8 @@ var transport = &http.Transport{
 	ReadBufferSize:        64 * 1024,
 	WriteBufferSize:       64 * 1024,
 	ExpectContinueTimeout: 0,
-	DisableKeepAlives:     false,
 }
 
-// buffer pool: 64KB buffers reused across requests
 var bufPool = sync.Pool{
 	New: func() any {
 		b := make([]byte, 64*1024)
@@ -34,7 +33,6 @@ var bufPool = sync.Pool{
 }
 
 // copyHeaders writes src headers into dst without allocating a new map.
-// This avoids the Header.Clone() that httputil.ReverseProxy does.
 func copyHeaders(dst, src http.Header) {
 	for k, vv := range src {
 		for _, v := range vv {
@@ -43,26 +41,31 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
-// proxyDo is a hand-rolled reverse proxy that avoids the allocations
-// in httputil.ReverseProxy:
-//   - no Request.Clone (reuses the inbound request directly)
-//   - no Header.Clone (copies headers field by field)
-//   - uses pooled buffers for io.Copy
-//   - single shared transport with aggressive connection reuse
+// proxyDo forwards the request to the target backend.
+// Avoids httputil.ReverseProxy overhead by:
+//   - constructing the outbound URL directly (no String() + re-parse)
+//   - copying headers without cloning the map
+//   - using pooled 64KB buffers for the body copy
 func proxyDo(w http.ResponseWriter, r *http.Request, targetHost, targetScheme string) int {
-	outURL := *r.URL
-	outURL.Host = targetHost
-	outURL.Scheme = targetScheme
-
-	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), r.Body)
-	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return 400
+	outReq := &http.Request{
+		Method:        r.Method,
+		URL:           &url.URL{
+			Scheme:   targetScheme,
+			Host:     targetHost,
+			Path:     r.URL.Path,
+			RawQuery: r.URL.RawQuery,
+		},
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        make(http.Header, len(r.Header)),
+		Body:          r.Body,
+		ContentLength: r.ContentLength,
+		Host:          targetHost,
 	}
+	outReq = outReq.WithContext(r.Context())
 	copyHeaders(outReq.Header, r.Header)
 	outReq.Header.Set("X-Forwarded-Host", r.Host)
-	outReq.Host = targetHost
-	outReq.ContentLength = r.ContentLength
 
 	resp, err := transport.RoundTrip(outReq)
 	if err != nil {

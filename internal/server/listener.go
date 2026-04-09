@@ -17,6 +17,11 @@ func newReusePortListener(addr string) (net.Listener, error) {
 			var opErr error
 			err := c.Control(func(fd uintptr) {
 				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+				if opErr != nil {
+					return
+				}
+				// disable Nagle's algorithm for lower latency
+				_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_NODELAY, 1)
 			})
 			if err != nil {
 				return err

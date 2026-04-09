@@ -1,46 +1,34 @@
 package configs
 
 import (
-	"fmt"
-	"strings"
+	"os"
 
-	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
-type resource struct {
-	Name            string
-	Endpoint        string
-	Destination_URL string
+type Resource struct {
+	Name           string `yaml:"name"`
+	Endpoint       string `yaml:"endpoint"`
+	DestinationURL string `yaml:"destination_url"`
 }
 
-type configuration struct {
+type Configuration struct {
 	Server struct {
-		Host        string
-		Listen_port string
-		Scheme      string
-	}
-
-	Resources []resource
+		Host       string `yaml:"host"`
+		ListenPort string `yaml:"listen_port"`
+		Scheme     string `yaml:"scheme"`
+	} `yaml:"server"`
+	Resources []Resource `yaml:"resources"`
 }
 
-var Config *configuration
-
-func NewConfiguration() (*configuration, error) {
-	viper.AddConfigPath("data")
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AutomaticEnv()
-
-	viper.SetEnvKeyReplacer(strings.NewReplacer(`.`, `_`))
-	err := viper.ReadInConfig()
-
+func Load(path string) (*Configuration, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("error loading config file: %s", err)
+		return nil, err
 	}
-
-	err = viper.Unmarshal(&Config)
-	if err != nil {
-		return nil, fmt.Errorf("error reading config file: %s", err)
+	var cfg Configuration
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
 	}
-	return Config, nil
+	return &cfg, nil
 }

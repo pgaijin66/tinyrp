@@ -1,9 +1,14 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -46,7 +51,24 @@ func Run() error {
 		ReadHeaderTimeout: 2 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
-	return srv.Serve(ln)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(ln)
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case sig := <-quit:
+		log.Printf("received %s, shutting down", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return srv.Shutdown(ctx)
+	case err := <-errCh:
+		return err
+	}
 }
 
 func buildBackends(urls []string) ([]lb.Backend, error) {

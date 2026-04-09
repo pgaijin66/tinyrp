@@ -2,3 +2,4 @@ scripts/dev.sh
 bin/
 bench/*_bin
 bench/results/
+bench.test

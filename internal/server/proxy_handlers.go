@@ -33,11 +33,11 @@ var bufPool = sync.Pool{
 }
 
 // copyHeaders writes src headers into dst without allocating a new map.
+// Uses direct map assignment to avoid the overhead of Header.Add
+// which canonicalizes the key on every call.
 func copyHeaders(dst, src http.Header) {
 	for k, vv := range src {
-		for _, v := range vv {
-			dst.Add(k, v)
-		}
+		dst[k] = vv
 	}
 }
 

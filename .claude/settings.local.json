@@ -15,7 +15,9 @@
       "Bash(xargs kill:*)",
       "Bash(git reset:*)",
       "Bash(git checkout:*)",
-      "Bash(go tool:*)"
+      "Bash(go tool:*)",
+      "Bash(wrk -t4 -c100 -d3s http://127.0.0.1:9090/)",
+      "Bash(wrk -t4 -c100 -d10s --latency http://127.0.0.1:9090/)"
     ]
   }
 }

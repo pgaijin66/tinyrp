@@ -47,27 +47,27 @@ func copyHeaders(dst, src http.Header) {
 //   - copying headers without cloning the map
 //   - using pooled 64KB buffers for the body copy
 func proxyDo(w http.ResponseWriter, r *http.Request, targetHost, targetScheme string) int {
-	outReq := &http.Request{
-		Method:        r.Method,
-		URL:           &url.URL{
-			Scheme:   targetScheme,
-			Host:     targetHost,
-			Path:     r.URL.Path,
-			RawQuery: r.URL.RawQuery,
-		},
-		Proto:         "HTTP/1.1",
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Header:        make(http.Header, len(r.Header)),
-		Body:          r.Body,
-		ContentLength: r.ContentLength,
-		Host:          targetHost,
-	}
-	outReq = outReq.WithContext(r.Context())
-	copyHeaders(outReq.Header, r.Header)
-	outReq.Header.Set("X-Forwarded-Host", r.Host)
+	// Mutate the inbound request in-place for the outbound call.
+	// This avoids allocating a new Request, URL, Header map, and context.
+	// We restore the original values after RoundTrip returns.
+	origURL := r.URL
+	origHost := r.Host
 
-	resp, err := transport.RoundTrip(outReq)
+	r.URL = &url.URL{
+		Scheme:   targetScheme,
+		Host:     targetHost,
+		Path:     origURL.Path,
+		RawQuery: origURL.RawQuery,
+	}
+	r.Host = targetHost
+	r.Header.Set("X-Forwarded-Host", origHost)
+	r.RequestURI = "" // required for client requests
+	resp, err := transport.RoundTrip(r)
+
+	// restore the original request state
+	r.URL = origURL
+	r.Host = origHost
+
 	if err != nil {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return 502

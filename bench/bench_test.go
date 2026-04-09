@@ -34,27 +34,28 @@ var bufPool = sync.Pool{
 
 func copyHeaders(dst, src http.Header) {
 	for k, vv := range src {
-		for _, v := range vv {
-			dst.Add(k, v)
-		}
+		dst[k] = vv
 	}
 }
 
 func proxyDo(w http.ResponseWriter, r *http.Request, targetHost, targetScheme string) {
-	outURL := *r.URL
-	outURL.Host = targetHost
-	outURL.Scheme = targetScheme
+	origURL := r.URL
+	origHost := r.Host
 
-	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), r.Body)
-	if err != nil {
-		http.Error(w, "bad request", 400)
-		return
+	r.URL = &url.URL{
+		Scheme:   targetScheme,
+		Host:     targetHost,
+		Path:     origURL.Path,
+		RawQuery: origURL.RawQuery,
 	}
-	copyHeaders(outReq.Header, r.Header)
-	outReq.Host = targetHost
-	outReq.ContentLength = r.ContentLength
+	r.Host = targetHost
+	r.RequestURI = ""
 
-	resp, err := benchTransport.RoundTrip(outReq)
+	resp, err := benchTransport.RoundTrip(r)
+
+	r.URL = origURL
+	r.Host = origHost
+
 	if err != nil {
 		http.Error(w, "bad gateway", 502)
 		return

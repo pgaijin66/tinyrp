@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/pgaijin66/lightweight-reverse-proxy/internal/server"
+	"github.com/pgaijin66/tinyrp/internal/server"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-module github.com/pgaijin66/lightweight-reverse-proxy
+module github.com/pgaijin66/tinyrp
 
 go 1.23
 

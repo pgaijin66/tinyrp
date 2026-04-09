@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/pgaijin66/lightweight-reverse-proxy/internal/configs"
+	"github.com/pgaijin66/tinyrp/internal/configs"
 )
 
 func Run() error {

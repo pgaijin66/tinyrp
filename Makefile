@@ -4,24 +4,30 @@ help:
 	@echo 'Usage:'
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
 
-## run-containers: starts demo http services
-.PHONY: run-containers
-run-containers:
-	docker run --rm -d -p 9001:80 --name server1 kennethreitz/httpbin
-	docker run --rm -d -p 9002:80 --name server2 kennethreitz/httpbin
-	docker run --rm -d -p 9003:80 --name server3 kennethreitz/httpbin
-
-## run-proxy-server: starts demo http services
-.PHONY: run-proxy-server
-run-proxy-server:
+## run: start the proxy server
+.PHONY: run
+run:
 	go run cmd/main.go
 
-## stop: stops all demo services
-.PHONY: stop
-stop:
-	docker stop server1
-	docker stop server2
-	docker stop server3
+## build: compile binary to ./bin/tinyrp
+.PHONY: build
+build:
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/tinyrp cmd/main.go
+
+## test: run all tests with race detector
+.PHONY: test
+test:
+	go test -race ./...
+
+## bench: run benchmarks
+.PHONY: bench
+bench:
+	go test -bench=. -benchmem -count=3 -cpu=1,4,8 ./bench/
+
+## bench-quick: run benchmarks (single pass)
+.PHONY: bench-quick
+bench-quick:
+	go test -bench=. -benchmem -count=1 -cpu=4 ./bench/
 
 ## tidy: format code and tidy modfile
 .PHONY: tidy
@@ -29,14 +35,7 @@ tidy:
 	go fmt ./...
 	go mod tidy -v
 
-## audit: run quality control checks
-.PHONY: audit
-audit:
+## vet: run static analysis
+.PHONY: vet
+vet:
 	go vet ./...
-	go run honnef.co/go/tools/cmd/staticcheck@latest -checks=all,-ST1000,-U1000 ./...
-	go test -race -vet=off ./...
-	go mod verify
-
-## build: builds binary and places them into /usr/bin
-build:
-	./scripts/go.sh build

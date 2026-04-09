@@ -32,8 +32,13 @@ func Run() error {
 		registerRoute(router, resource.Endpoint, rr)
 	}
 
+	addr := config.Server.Host + ":" + config.Server.ListenPort
+	ln, err := newReusePortListener(addr)
+	if err != nil {
+		return fmt.Errorf("failed to create listener on %s: %w", addr, err)
+	}
+
 	srv := &http.Server{
-		Addr:              config.Server.Host + ":" + config.Server.ListenPort,
 		Handler:           router,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -41,7 +46,7 @@ func Run() error {
 		ReadHeaderTimeout: 2 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
-	return srv.ListenAndServe()
+	return srv.Serve(ln)
 }
 
 func buildBackends(urls []string) ([]lb.Backend, error) {

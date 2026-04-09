@@ -3,12 +3,12 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/pgaijin66/tinyrp/internal/configs"
+	"github.com/pgaijin66/tinyrp/internal/lb"
 )
 
 func Run() error {
@@ -23,12 +23,12 @@ func Run() error {
 	})
 
 	for _, resource := range config.Resources {
-		u, err := url.Parse(resource.DestinationURL)
+		backends, err := buildBackends(resource.Backends())
 		if err != nil {
-			return fmt.Errorf("invalid destination URL %q: %w", resource.DestinationURL, err)
+			return fmt.Errorf("resource %q: %w", resource.Name, err)
 		}
-		proxy := NewProxy(u)
-		registerRoute(router, resource.Endpoint, proxy, u)
+		rr := lb.NewRoundRobin(backends)
+		registerRoute(router, resource.Endpoint, rr)
 	}
 
 	srv := &http.Server{
@@ -38,26 +38,42 @@ func Run() error {
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		ReadHeaderTimeout: 2 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1MB
+		MaxHeaderBytes:    1 << 20,
 	}
 	return srv.ListenAndServe()
 }
 
-func registerRoute(router *httprouter.Router, endpoint string, proxy *httputil.ReverseProxy, target *url.URL) {
-	handler := makeHandler(proxy, target, endpoint)
+func buildBackends(urls []string) ([]lb.Backend, error) {
+	backends := make([]lb.Backend, 0, len(urls))
+	for _, raw := range urls {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid URL %q: %w", raw, err)
+		}
+		backends = append(backends, lb.Backend{
+			URL:   u,
+			Proxy: NewProxy(u),
+		})
+	}
+	return backends, nil
+}
+
+func registerRoute(router *httprouter.Router, endpoint string, rr *lb.RoundRobin) {
+	handler := makeHandler(rr)
 	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 	for _, m := range methods {
 		router.Handle(m, endpoint+"/*path", handler)
 	}
 }
 
-func makeHandler(proxy *httputil.ReverseProxy, target *url.URL, endpoint string) httprouter.Handle {
+func makeHandler(rr *lb.RoundRobin) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		r.URL.Host = target.Host
-		r.URL.Scheme = target.Scheme
+		backend := rr.Next()
+		r.URL.Host = backend.URL.Host
+		r.URL.Scheme = backend.URL.Scheme
 		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-		r.Host = target.Host
+		r.Host = backend.URL.Host
 		r.URL.Path = ps.ByName("path")
-		proxy.ServeHTTP(w, r)
+		backend.Proxy.ServeHTTP(w, r)
 	}
 }

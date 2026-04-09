@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/pgaijin66/tinyrp/internal/cb"
 	"github.com/pgaijin66/tinyrp/internal/configs"
 	"github.com/pgaijin66/tinyrp/internal/lb"
@@ -24,8 +24,8 @@ func Run() error {
 		return fmt.Errorf("could not load configuration: %w", err)
 	}
 
-	router := httprouter.New()
-	router.GET("/ping", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("pong"))
 	})
 
@@ -35,7 +35,10 @@ func Run() error {
 			return fmt.Errorf("resource %q: %w", resource.Name, err)
 		}
 		rr := lb.NewRoundRobin(backends)
-		registerRoute(router, resource.Endpoint, rr)
+		// Go 1.22+ catch-all: /server1/ matches /server1/anything
+		pattern := resource.Endpoint + "/"
+		endpoint := resource.Endpoint
+		mux.HandleFunc(pattern, makeHandler(rr, endpoint))
 	}
 
 	addr := config.Server.Host + ":" + config.Server.ListenPort
@@ -45,7 +48,7 @@ func Run() error {
 	}
 
 	srv := &http.Server{
-		Handler:           router,
+		Handler:           mux,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -80,44 +83,20 @@ func buildBackends(urls []string) ([]lb.Backend, error) {
 			return nil, fmt.Errorf("invalid URL %q: %w", raw, err)
 		}
 		backends = append(backends, lb.Backend{
-			URL:   u,
-			Proxy: NewProxy(u),
-			CB:    cb.New(5, 10*time.Second),
+			URL: u,
+			CB:  cb.New(5, 10*time.Second),
 		})
 	}
 	return backends, nil
 }
 
-func registerRoute(router *httprouter.Router, endpoint string, rr *lb.RoundRobin) {
-	handler := makeHandler(rr)
-	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
-	for _, m := range methods {
-		router.Handle(m, endpoint+"/*path", handler)
-	}
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (sr *statusRecorder) WriteHeader(code int) {
-	sr.status = code
-	sr.ResponseWriter.WriteHeader(code)
-}
-
-func (sr *statusRecorder) Flush() {
-	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func makeHandler(rr *lb.RoundRobin) httprouter.Handle {
+func makeHandler(rr *lb.RoundRobin, endpoint string) http.HandlerFunc {
 	rc := retry.Default
 
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		path := ps.ByName("path")
-		origHost := r.Header.Get("Host")
+	return func(w http.ResponseWriter, r *http.Request) {
+		origHost := r.Host
+		path := strings.TrimPrefix(r.URL.Path, endpoint)
+		r.URL.Path = path
 
 		for attempt := 0; attempt < rc.MaxAttempts; attempt++ {
 			if attempt > 0 {
@@ -125,28 +104,20 @@ func makeHandler(rr *lb.RoundRobin) httprouter.Handle {
 			}
 
 			backend := rr.Next()
-			r.URL.Host = backend.URL.Host
-			r.URL.Scheme = backend.URL.Scheme
-			r.Header.Set("X-Forwarded-Host", origHost)
-			r.Host = backend.URL.Host
-			r.URL.Path = path
+			r.Host = origHost
 
-			rec := &statusRecorder{ResponseWriter: w, status: 200}
-			backend.Proxy.ServeHTTP(rec, r)
+			status := proxyDo(w, r, backend.URL.Host, backend.URL.Scheme)
 
 			if backend.CB != nil {
-				if rec.status >= 500 {
+				if status >= 500 {
 					backend.CB.RecordFailure()
 				} else {
 					backend.CB.RecordSuccess()
 				}
 			}
 
-			// only retry on gateway errors and only if we have multiple backends
-			if rec.status == 502 || rec.status == 503 || rec.status == 504 {
-				if rr.Len() > 1 {
-					continue
-				}
+			if (status == 502 || status == 503 || status == 504) && rr.Len() > 1 {
+				continue
 			}
 			return
 		}

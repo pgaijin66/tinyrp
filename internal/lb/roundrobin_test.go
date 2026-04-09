@@ -25,8 +25,8 @@ func TestRoundRobinDistribution(t *testing.T) {
 	counts := [3]int{}
 	for i := 0; i < 300; i++ {
 		b := rr.Next()
-		for j, bb := range rr.backends {
-			if b.URL == bb.URL && b.CB == bb.CB {
+		for j := range rr.backends {
+			if b == &rr.backends[j] {
 				counts[j]++
 				break
 			}
@@ -41,7 +41,6 @@ func TestRoundRobinDistribution(t *testing.T) {
 
 func TestSkipsOpenCircuitBreaker(t *testing.T) {
 	backends := makeBackends(3)
-	// trip backend 0
 	for i := 0; i < 3; i++ {
 		backends[0].CB.RecordFailure()
 	}
@@ -64,7 +63,6 @@ func TestFallbackWhenAllOpen(t *testing.T) {
 	}
 	rr := NewRoundRobin(backends)
 
-	// should still return something (fallback)
 	b := rr.Next()
 	if b.URL == nil {
 		t.Fatal("should return a backend even when all are open")

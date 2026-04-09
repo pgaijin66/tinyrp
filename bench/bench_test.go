@@ -2,39 +2,73 @@ package bench
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/pgaijin66/tinyrp/internal/lb"
 )
 
-// shared tuned transport (mirrors the real proxy)
+// shared tuned transport matching the real proxy
 var benchTransport = &http.Transport{
-	MaxIdleConns:        1024,
-	MaxIdleConnsPerHost: 256,
+	MaxIdleConns:        2048,
+	MaxIdleConnsPerHost: 512,
 	IdleConnTimeout:     90 * time.Second,
 	DisableCompression:  true,
 	ForceAttemptHTTP2:   true,
-	ReadBufferSize:      32 * 1024,
-	WriteBufferSize:     32 * 1024,
+	ReadBufferSize:      64 * 1024,
+	WriteBufferSize:     64 * 1024,
 }
 
-type bufPool struct{ pool sync.Pool }
-
-func (b *bufPool) Get() []byte  { return b.pool.Get().([]byte) }
-func (b *bufPool) Put(buf []byte) { b.pool.Put(buf) }
-
-var sharedPool = &bufPool{
-	pool: sync.Pool{New: func() any { return make([]byte, 32*1024) }},
+var bufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 64*1024)
+		return &b
+	},
 }
 
-// backend returns a minimal test server that responds with a small body
+func copyHeaders(dst, src http.Header) {
+	for k, vv := range src {
+		for _, v := range vv {
+			dst.Add(k, v)
+		}
+	}
+}
+
+func proxyDo(w http.ResponseWriter, r *http.Request, targetHost, targetScheme string) {
+	outURL := *r.URL
+	outURL.Host = targetHost
+	outURL.Scheme = targetScheme
+
+	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), r.Body)
+	if err != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	copyHeaders(outReq.Header, r.Header)
+	outReq.Host = targetHost
+	outReq.ContentLength = r.ContentLength
+
+	resp, err := benchTransport.RoundTrip(outReq)
+	if err != nil {
+		http.Error(w, "bad gateway", 502)
+		return
+	}
+	defer resp.Body.Close()
+
+	copyHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+
+	bufp := bufPool.Get().(*[]byte)
+	io.CopyBuffer(w, resp.Body, *bufp)
+	bufPool.Put(bufp)
+}
+
 func newBackend() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
@@ -53,37 +87,29 @@ func newLargeBackend(size int) *httptest.Server {
 	}))
 }
 
-func buildProxy(backendURL string) *httputil.ReverseProxy {
-	u, _ := url.Parse(backendURL)
-	proxy := httputil.NewSingleHostReverseProxy(u)
-	proxy.Transport = benchTransport
-	proxy.BufferPool = sharedPool
-	return proxy
-}
-
 func buildRouter(backendURL string) http.Handler {
 	u, _ := url.Parse(backendURL)
-	proxy := buildProxy(backendURL)
-
-	router := httprouter.New()
-	router.Handle("GET", "/proxy/*path", func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		r.URL.Host = u.Host
-		r.URL.Scheme = u.Scheme
-		r.Host = u.Host
-		r.URL.Path = ps.ByName("path")
-		proxy.ServeHTTP(w, r)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/proxy/", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/proxy")
+		proxyDo(w, r, u.Host, u.Scheme)
 	})
-	return router
+	return mux
 }
 
-// BenchmarkProxySmallBody measures throughput for small responses
 func BenchmarkProxySmallBody(b *testing.B) {
 	backend := newBackend()
 	defer backend.Close()
 	proxy := httptest.NewServer(buildRouter(backend.URL))
 	defer proxy.Close()
 
-	client := proxy.Client()
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext,
+			MaxIdleConnsPerHost: 256,
+			DisableCompression:  true,
+		},
+	}
 	b.ResetTimer()
 	b.ReportAllocs()
 
@@ -99,14 +125,19 @@ func BenchmarkProxySmallBody(b *testing.B) {
 	})
 }
 
-// BenchmarkProxyLargeBody measures throughput for 1MB responses
 func BenchmarkProxyLargeBody(b *testing.B) {
 	backend := newLargeBackend(1024 * 1024)
 	defer backend.Close()
 	proxy := httptest.NewServer(buildRouter(backend.URL))
 	defer proxy.Close()
 
-	client := proxy.Client()
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext,
+			MaxIdleConnsPerHost: 256,
+			DisableCompression:  true,
+		},
+	}
 	b.ResetTimer()
 	b.ReportAllocs()
 
@@ -122,7 +153,6 @@ func BenchmarkProxyLargeBody(b *testing.B) {
 	})
 }
 
-// BenchmarkRoundRobin measures the load balancer selection overhead
 func BenchmarkRoundRobin(b *testing.B) {
 	backends := make([]lb.Backend, 4)
 	for i := range backends {
@@ -140,7 +170,6 @@ func BenchmarkRoundRobin(b *testing.B) {
 	})
 }
 
-// BenchmarkProxyLatency measures single request p50/p99 latency
 func BenchmarkProxyLatency(b *testing.B) {
 	backend := newBackend()
 	defer backend.Close()
@@ -162,7 +191,6 @@ func BenchmarkProxyLatency(b *testing.B) {
 	}
 }
 
-// BenchmarkDirectVsProxy compares direct backend access to proxied access
 func BenchmarkDirectVsProxy(b *testing.B) {
 	backend := newBackend()
 	defer backend.Close()
@@ -170,7 +198,13 @@ func BenchmarkDirectVsProxy(b *testing.B) {
 	defer proxy.Close()
 
 	b.Run("direct", func(b *testing.B) {
-		client := backend.Client()
+		client := &http.Client{
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext,
+				MaxIdleConnsPerHost: 256,
+				DisableCompression:  true,
+			},
+		}
 		b.ResetTimer()
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
@@ -186,7 +220,13 @@ func BenchmarkDirectVsProxy(b *testing.B) {
 	})
 
 	b.Run("proxied", func(b *testing.B) {
-		client := proxy.Client()
+		client := &http.Client{
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext,
+				MaxIdleConnsPerHost: 256,
+				DisableCompression:  true,
+			},
+		}
 		b.ResetTimer()
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {

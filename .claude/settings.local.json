@@ -6,7 +6,16 @@
       "Bash(go mod:*)",
       "Bash(go build:*)",
       "Bash(go get:*)",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "Bash(brew list:*)",
+      "Bash(brew install:*)",
+      "Bash(chmod +x:*)",
+      "Bash(bash:*)",
+      "Bash(curl -sf http://127.0.0.1:9090/)",
+      "Bash(xargs kill:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(go tool:*)"
     ]
   }
 }

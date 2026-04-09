@@ -1,7 +1,7 @@
 package lb
 
 import (
-	"net/http/httputil"
+	"net/http"
 	"net/url"
 	"sync/atomic"
 
@@ -9,9 +9,9 @@ import (
 )
 
 type Backend struct {
-	URL   *url.URL
-	Proxy *httputil.ReverseProxy
-	CB    *cb.CircuitBreaker
+	URL    *url.URL
+	Client *http.Client
+	CB     *cb.CircuitBreaker
 }
 
 type RoundRobin struct {
@@ -25,17 +25,16 @@ func NewRoundRobin(backends []Backend) *RoundRobin {
 
 // Next returns the next healthy backend, skipping open circuit breakers.
 // Falls back to plain round-robin if all are tripped.
-func (rr *RoundRobin) Next() Backend {
+func (rr *RoundRobin) Next() *Backend {
 	total := uint64(len(rr.backends))
 	start := rr.counter.Add(1)
 	for i := uint64(0); i < total; i++ {
-		b := rr.backends[(start+i)%total]
+		b := &rr.backends[(start+i)%total]
 		if b.CB == nil || b.CB.Allow() {
 			return b
 		}
 	}
-	// all open — try anyway
-	return rr.backends[start%total]
+	return &rr.backends[start%total]
 }
 
 func (rr *RoundRobin) Len() int {

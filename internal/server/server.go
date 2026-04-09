@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/pgaijin66/tinyrp/internal/cb"
 	"github.com/pgaijin66/tinyrp/internal/configs"
 	"github.com/pgaijin66/tinyrp/internal/lb"
 )
@@ -53,6 +54,7 @@ func buildBackends(urls []string) ([]lb.Backend, error) {
 		backends = append(backends, lb.Backend{
 			URL:   u,
 			Proxy: NewProxy(u),
+			CB:    cb.New(5, 10*time.Second),
 		})
 	}
 	return backends, nil
@@ -66,6 +68,16 @@ func registerRoute(router *httprouter.Router, endpoint string, rr *lb.RoundRobin
 	}
 }
 
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.status = code
+	sr.ResponseWriter.WriteHeader(code)
+}
+
 func makeHandler(rr *lb.RoundRobin) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		backend := rr.Next()
@@ -74,6 +86,16 @@ func makeHandler(rr *lb.RoundRobin) httprouter.Handle {
 		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
 		r.Host = backend.URL.Host
 		r.URL.Path = ps.ByName("path")
-		backend.Proxy.ServeHTTP(w, r)
+
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		backend.Proxy.ServeHTTP(rec, r)
+
+		if backend.CB != nil {
+			if rec.status >= 500 {
+				backend.CB.RecordFailure()
+			} else {
+				backend.CB.RecordSuccess()
+			}
+		}
 	}
 }

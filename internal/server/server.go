@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/pgaijin66/tinyrp/internal/configs"
@@ -30,8 +31,16 @@ func Run() error {
 		registerRoute(router, resource.Endpoint, proxy, u)
 	}
 
-	addr := config.Server.Host + ":" + config.Server.ListenPort
-	return http.ListenAndServe(addr, router)
+	srv := &http.Server{
+		Addr:              config.Server.Host + ":" + config.Server.ListenPort,
+		Handler:           router,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: 2 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB
+	}
+	return srv.ListenAndServe()
 }
 
 func registerRoute(router *httprouter.Router, endpoint string, proxy *httputil.ReverseProxy, target *url.URL) {

@@ -15,6 +15,7 @@ import (
 	"github.com/pgaijin66/tinyrp/internal/cb"
 	"github.com/pgaijin66/tinyrp/internal/configs"
 	"github.com/pgaijin66/tinyrp/internal/lb"
+	"github.com/pgaijin66/tinyrp/internal/retry"
 )
 
 func Run() error {
@@ -106,23 +107,42 @@ func (sr *statusRecorder) WriteHeader(code int) {
 }
 
 func makeHandler(rr *lb.RoundRobin) httprouter.Handle {
+	rc := retry.Default
+
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		backend := rr.Next()
-		r.URL.Host = backend.URL.Host
-		r.URL.Scheme = backend.URL.Scheme
-		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-		r.Host = backend.URL.Host
-		r.URL.Path = ps.ByName("path")
+		path := ps.ByName("path")
+		origHost := r.Header.Get("Host")
 
-		rec := &statusRecorder{ResponseWriter: w, status: 200}
-		backend.Proxy.ServeHTTP(rec, r)
-
-		if backend.CB != nil {
-			if rec.status >= 500 {
-				backend.CB.RecordFailure()
-			} else {
-				backend.CB.RecordSuccess()
+		for attempt := 0; attempt < rc.MaxAttempts; attempt++ {
+			if attempt > 0 {
+				time.Sleep(rc.Delay(attempt - 1))
 			}
+
+			backend := rr.Next()
+			r.URL.Host = backend.URL.Host
+			r.URL.Scheme = backend.URL.Scheme
+			r.Header.Set("X-Forwarded-Host", origHost)
+			r.Host = backend.URL.Host
+			r.URL.Path = path
+
+			rec := &statusRecorder{ResponseWriter: w, status: 200}
+			backend.Proxy.ServeHTTP(rec, r)
+
+			if backend.CB != nil {
+				if rec.status >= 500 {
+					backend.CB.RecordFailure()
+				} else {
+					backend.CB.RecordSuccess()
+				}
+			}
+
+			// only retry on gateway errors and only if we have multiple backends
+			if rec.status == 502 || rec.status == 503 || rec.status == 504 {
+				if rr.Len() > 1 {
+					continue
+				}
+			}
+			return
 		}
 	}
 }
